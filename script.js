@@ -198,7 +198,9 @@ async function loadChatList() {
     if (!user || typeof db === 'undefined') return;
 
     try {
+        // Only fetch chats belonging to the current mode
         const snapshot = await db.collection('users').doc(user.uid).collection('chats')
+            .where('mode', '==', appMode || 'online')
             .orderBy('updatedAt', 'desc').limit(30).get();
 
         const container = document.getElementById('sidebar-chats');
@@ -293,6 +295,7 @@ async function saveChat(userText, fileMetadata) {
                 userText.substring(0, 60) + (userText.length > 60 ? '...' : '') :
                 undefined, // keep existing title
             messages: conversationHistory.slice(-MAX_HISTORY),
+            mode: appMode || 'online',
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         };
 
@@ -338,7 +341,10 @@ document.getElementById('select-online').addEventListener('click', () => {
     hideModeScreen();
     setMode('online');
     addBotMessage("🌐 **Online Mode activated!** Full Gemini AI is ready. Ask me anything — I can answer any question, generate code, analyze images, and more! 🚀");
-    loadChatList();
+    // Only reload if not already viewing online chats to save a database hit
+    if (!chatMessages.innerHTML.includes('Online Mode')) {
+        loadChatList();
+    }
 });
 
 document.getElementById('select-offline').addEventListener('click', () => {
@@ -346,7 +352,9 @@ document.getElementById('select-offline').addEventListener('click', () => {
     setMode('offline');
     chatMessages.innerHTML = '';
     initOfflineWithWebLLM();
-    loadChatList();
+    if (!chatMessages.innerHTML.includes('Offline Mode')) {
+        loadChatList();
+    }
 });
 
 // ===== WebLLM Initialization =====
