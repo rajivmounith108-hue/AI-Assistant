@@ -134,21 +134,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ===== User Profile Setup =====
 function setupUserProfile() {
-    const user = window._currentUser || (typeof auth !== 'undefined' ? auth.currentUser : null);
-    if (!user) return;
+    if (typeof auth !== 'undefined') {
+        auth.onAuthStateChanged((user) => {
+            if (!user) return;
+            const avatarEl = document.getElementById('user-avatar');
+            const nameEl = document.getElementById('user-name');
+            const signoutBtn = document.getElementById('signout-btn');
 
-    const avatarEl = document.getElementById('user-avatar');
-    const nameEl = document.getElementById('user-name');
-    const signoutBtn = document.getElementById('signout-btn');
-
-    if (avatarEl && user.photoURL) {
-        // Add cache buster for Google profile photos to bypass stale 403s
-        avatarEl.src = user.photoURL + "?sz=128&_t=" + Date.now();
-    }
-    if (nameEl) nameEl.textContent = user.displayName || user.email || 'User';
-    if (signoutBtn) {
-        signoutBtn.addEventListener('click', () => {
-            window.signOutUser();
+            if (avatarEl && user.photoURL) {
+                // Add cache buster for Google profile photos to bypass stale 403s
+                avatarEl.src = user.photoURL + "?sz=128&_t=" + Date.now();
+            }
+            if (nameEl) nameEl.textContent = user.displayName || user.email || 'User';
+            if (signoutBtn) {
+                // Use onclick to prevent duplicate listeners if auth state changes multiple times
+                signoutBtn.onclick = () => window.signOutUser();
+            }
         });
     }
 }
