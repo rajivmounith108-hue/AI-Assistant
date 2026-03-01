@@ -127,8 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
             chatMessages.innerHTML = '';
             initOfflineWithWebLLM();
         }
-        // Load chat history from Firestore
-        loadChatList();
+        // Chat history loading is now handled inside setupUserProfile's auth observer
     }
 });
 
@@ -150,6 +149,11 @@ function setupUserProfile() {
                 // Use onclick to prevent duplicate listeners if auth state changes multiple times
                 signoutBtn.onclick = () => window.signOutUser();
             }
+
+            // Now that user is definitely loaded, fetch chat history
+            if (appMode) {
+                loadChatList();
+            }
         });
     }
 }
@@ -158,10 +162,17 @@ function setupUserProfile() {
 const sidebarToggle = document.getElementById('sidebar-toggle');
 const chatSidebar = document.getElementById('chat-sidebar');
 const newChatBtn = document.getElementById('new-chat-btn');
+const sidebarCloseBtn = document.getElementById('sidebar-close-btn');
 
 if (sidebarToggle && chatSidebar) {
     sidebarToggle.addEventListener('click', () => {
         chatSidebar.classList.toggle('open');
+    });
+}
+
+if (sidebarCloseBtn && chatSidebar) {
+    sidebarCloseBtn.addEventListener('click', () => {
+        chatSidebar.classList.remove('open');
     });
 }
 
@@ -195,6 +206,10 @@ async function loadChatList() {
 
         if (snapshot.empty) {
             container.innerHTML = '<div class="sidebar-empty">No conversations yet.<br>Start chatting!</div>';
+            // Force a new chat to initialize properly if they have zero history
+            if (!currentChatId) {
+                startNewChat();
+            }
             return;
         }
 
