@@ -362,10 +362,7 @@ document.getElementById('select-online').addEventListener('click', () => {
     hideModeScreen();
     setMode('online');
     addBotMessage("🌐 **Online Mode activated!** Full Gemini AI is ready. Ask me anything — I can answer any question, generate code, analyze images, and more! 🚀");
-    // Only reload if not already viewing online chats to save a database hit
-    if (!chatMessages.innerHTML.includes('Online Mode')) {
-        loadChatList();
-    }
+    loadChatList();
 });
 
 document.getElementById('select-offline').addEventListener('click', () => {
@@ -373,9 +370,7 @@ document.getElementById('select-offline').addEventListener('click', () => {
     setMode('offline');
     chatMessages.innerHTML = '';
     initOfflineWithWebLLM();
-    if (!chatMessages.innerHTML.includes('Offline Mode')) {
-        loadChatList();
-    }
+    loadChatList();
 });
 
 // ===== WebLLM Initialization =====
