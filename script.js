@@ -2010,7 +2010,8 @@ async function callBackendAPI(userText, file) {
             return;
         }
 
-        const response = await fetch(`${BACKEND_URL}/api/chat`, {
+        const endpoint = `${window.location.origin}/api/chat`;
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ message: userText, file: filePayload, history: conversationHistory.slice(-10) })
