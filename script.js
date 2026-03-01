@@ -76,7 +76,7 @@ function setMode(mode) {
 function updateModeUI() {
     if (appMode === 'online') {
         statusDot.className = 'status-dot online';
-        statusText.textContent = 'Online AI (Gemini)';
+        statusText.textContent = 'Online AI';
         modeIndicator.textContent = '🌐 Online';
         modeIndicator.className = 'mode-indicator mode-online';
         heroModeText.textContent = 'Online Mode — Full AI Power';
