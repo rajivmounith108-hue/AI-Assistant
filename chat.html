@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="AI Assistant — Your intelligent companion for productivity, coding, writing, and more. Works online and offline.">
+    <title>AI Assistant — Your Intelligent Companion</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import * as webllm from 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.78/+esm';
+        window.webllm = webllm;
+        window.dispatchEvent(new Event('webllm-ready'));
+    </script>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✦</text></svg>">
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="auth.js"></script>
+    <script>
+        // Auth guard — redirect to login if not signed in
+        requireAuth(function (user) {
+            window._currentUser = user;
+            document.body.style.opacity = '0';
+            document.body.style.transition = 'opacity 0.6s ease';
+            requestAnimationFrame(function () { document.body.style.opacity = '1'; });
+        });
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch(() => { });
+            });
+        }
+    </script>
+</head>
+
+<body>
+    <!-- Mode Selection Screen -->
+    <div class="mode-screen" id="mode-screen">
+        <div class="mode-bg">
+            <div class="mode-orb mode-orb-1"></div>
+            <div class="mode-orb mode-orb-2"></div>
+            <div class="mode-orb mode-orb-3"></div>
+        </div>
+        <div class="mode-container">
+            <div class="mode-header">
+                <span class="mode-logo">✦</span>
+                <h1>AI Assistant</h1>
+                <p>Choose how you want to use AI today</p>
+            </div>
+            <div class="mode-cards">
+                <!-- Online Mode Card -->
+                <div class="mode-card mode-card-online" id="select-online">
+                    <div class="mode-card-glow"></div>
+                    <div class="mode-card-icon">🌐</div>
+                    <h2>Online Mode</h2>
+                    <p class="mode-card-desc">Full AI power with Google Gemini. Answers any question, generates code,
+                        analyzes images & files.</p>
+                    <ul class="mode-card-features">
+                        <li>✓ Answers any question accurately</li>
+                        <li>✓ Generates & debugs code</li>
+                        <li>✓ Image analysis & OCR</li>
+                        <li>✓ PDF, CSV, JSON analysis</li>
+                        <li>✓ Full translations (95+ languages)</li>
+                        <li>✓ Creative writing & essays</li>
+                    </ul>
+                    <div class="mode-card-badge">Powered by Gemini AI</div>
+                    <button class="btn btn-primary mode-btn">⚡ Use Online Mode</button>
+                </div>
+
+                <!-- Offline Mode Card -->
+                <div class="mode-card mode-card-offline" id="select-offline">
+                    <div class="mode-card-glow"></div>
+                    <div class="mode-card-icon">📡</div>
+                    <h2>Offline Mode</h2>
+                    <p class="mode-card-desc">Full AI power running locally in your browser. Download once, use forever
+                        — no internet needed!</p>
+                    <ul class="mode-card-features">
+                        <li>✓ No API key needed</li>
+                        <li>✓ Works 100% without internet</li>
+                        <li>✓ Answers any question (like online!)</li>
+                        <li>✓ Generates & debugs code</li>
+                        <li>✓ Summarizes text & files</li>
+                        <li>✓ One-time ~1 GB model download</li>
+                    </ul>
+                    <div class="mode-card-badge mode-card-badge-free">100% Free — No key needed</div>
+                    <button class="btn btn-secondary mode-btn">🔒 Use Offline Mode</button>
+                </div>
+            </div>
+            <p class="mode-footer">You can switch modes anytime from the app</p>
+        </div>
+    </div>
+    <!-- Mobile and desktop both support WebLLM offline now -->
+
+
+
+    <!-- Model Download Modal (for Offline LLM) -->
+    <div class="modal-overlay hidden" id="model-modal">
+        <div class="modal glass-card">
+            <div class="modal-icon">🧠</div>
+            <h2>Download AI Brain</h2>
+            <p>To work like Online AI, I need to download a language model (~1 GB) to your browser. This is a
+                <strong>one-time download</strong> — after that, I work 100% offline!
+            </p>
+            <div class="model-info-card">
+                <div class="model-info-name">SmolLM2 1.7B Instruct</div>
+                <div class="model-info-detail">~1 GB download · Cached forever · Runs locally via WebGPU</div>
+            </div>
+            <div class="model-progress-container" id="model-progress-container" style="display:none;">
+                <div class="model-progress-bar">
+                    <div class="model-progress-fill" id="model-progress-fill" style="width:0%"></div>
+                </div>
+                <div class="model-status" id="model-status">Preparing download...</div>
+            </div>
+            <button id="model-download-btn" class="btn btn-primary">⬇️ Download AI Model (~1 GB)</button>
+            <button id="model-skip-btn" class="btn btn-secondary modal-back-btn">Skip — use basic offline AI
+                instead</button>
+            <p class="modal-hint">💡 After download, you'll have full AI power without internet — forever!</p>
+        </div>
+    </div>
+
+    <!-- Floating Orbs Background -->
+    <div class="orb-container" aria-hidden="true">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+        <div class="orb orb-4"></div>
+        <div class="orb orb-5"></div>
+    </div>
+
+    <!-- Chat History Sidebar -->
+    <div class="chat-sidebar" id="chat-sidebar">
+        <div class="sidebar-header">
+            <h3>💬 Chat History</h3>
+            <button class="sidebar-new-chat" id="new-chat-btn" title="New Chat">+ New Chat</button>
+        </div>
+        <div class="sidebar-chats" id="sidebar-chats">
+            <div class="sidebar-empty">No conversations yet.<br>Start chatting!</div>
+        </div>
+        <div class="sidebar-user" id="sidebar-user">
+            <img class="sidebar-avatar" id="user-avatar" src="" alt="User">
+            <span class="sidebar-username" id="user-name">User</span>
+            <button class="sidebar-signout" id="signout-btn" title="Sign Out">↗ Sign Out</button>
+        </div>
+    </div>
+    <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle chat history">☰</button>
+
+    <!-- Navigation -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-container">
+            <a href="#" class="nav-logo">
+                <span class="logo-icon">✦</span>
+                <span class="logo-text">AI Assistant</span>
+            </a>
+            <ul class="nav-links" id="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#demo">Try It</a></li>
+                <li><a href="#about">About</a></li>
+                <li><a href="#" id="switch-mode" class="nav-api-btn">🔄 Switch Mode</a></li>
+            </ul>
+            <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="hero" id="hero">
+        <div class="hero-content">
+            <div class="hero-badge">
+                <span class="badge-dot"></span>
+                <span id="hero-mode-text">Works Online & Offline</span>
+            </div>
+            <h1 class="hero-title">
+                Meet Your
+                <span class="gradient-text">AI Assistant</span>
+            </h1>
+            <p class="hero-description">
+                Experience the future of productivity. Upload files, images, and documents — get instant summaries,
+                analysis, and answers. Works online with full AI power, or offline without any key!
+            </p>
+            <div class="hero-actions">
+                <a href="#demo" class="btn btn-primary">
+                    <span>Try It Now</span>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 12h14" />
+                        <path d="m12 5 7 7-7 7" />
+                    </svg>
+                </a>
+                <a href="#features" class="btn btn-secondary">Explore Features</a>
+            </div>
+            <div class="hero-stats">
+                <div class="stat">
+                    <span class="stat-number">📄 Files</span>
+                    <span class="stat-label">Upload & Summarize</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat">
+                    <span class="stat-number">🖼️ Images</span>
+                    <span class="stat-label">Analyze & Describe</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat">
+                    <span class="stat-number">💬 Chat</span>
+                    <span class="stat-label">Ask Anything</span>
+                </div>
+            </div>
+        </div>
+        <div class="hero-visual">
+            <div class="hero-card glass-card">
+                <div class="card-header">
+                    <div class="card-dots">
+                        <span></span><span></span><span></span>
+                    </div>
+                    <span class="card-title">AI Assistant</span>
+                </div>
+                <div class="card-body">
+                    <div class="chat-bubble bot">
+                        <p>Hello! I'm your AI assistant. Upload a file or ask me anything! 🚀</p>
+                    </div>
+                    <div class="chat-bubble user">
+                        <p>Summarize this research paper for me.</p>
+                    </div>
+                    <div class="chat-bubble bot">
+                        <p>Here's a concise summary of the paper's key findings and methodology...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Features Section -->
+    <section class="features" id="features">
+        <div class="section-container">
+            <div class="section-header">
+                <span class="section-tag">Capabilities</span>
+                <h2 class="section-title">Everything You Need,
+                    <span class="gradient-text">One Assistant</span>
+                </h2>
+                <p class="section-description">Upload any file, ask any question. Full power online with Gemini, or
+                    basic help offline.</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card glass-card" data-animate>
+                    <div class="feature-icon" style="--accent: #8b5cf6;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
+                        </svg>
+                    </div>
+                    <h3>Document Summary</h3>
+                    <p>Upload .txt, .pdf, .csv, or .json files and get instant AI-powered summaries and key insights.
+                    </p>
+                </div>
+                <div class="feature-card glass-card" data-animate>
+                    <div class="feature-icon" style="--accent: #06b6d4;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <polyline points="21 15 16 10 5 21" />
+                        </svg>
+                    </div>
+                    <h3>Image Analysis</h3>
+                    <p>Upload images to get detailed descriptions, object detection, and visual understanding. (Online
+                        mode)</p>
+                </div>
+                <div class="feature-card glass-card" data-animate>
+                    <div class="feature-icon" style="--accent: #ec4899;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                        </svg>
+                    </div>
+                    <h3>Smart Q&A</h3>
+                    <p>Ask any question — get accurate, detailed answers. The AI remembers context for deep
+                        conversation.</p>
+                </div>
+                <div class="feature-card glass-card" data-animate>
+                    <div class="feature-icon" style="--accent: #f59e0b;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="16 18 22 12 16 6" />
+                            <polyline points="8 6 2 12 8 18" />
+                        </svg>
+                    </div>
+                    <h3>Code Assistant</h3>
+                    <p>Write, debug, and optimize code across 50+ programming languages with AI assistance.</p>
+                </div>
+                <div class="feature-card glass-card" data-animate>
+                    <div class="feature-icon" style="--accent: #10b981;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8" />
+                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        </svg>
+                    </div>
+                    <h3>OCR & Extraction</h3>
+                    <p>Extract text from images, screenshots, and scanned documents with high accuracy. (Online mode)
+                    </p>
+                </div>
+                <div class="feature-card glass-card" data-animate>
+                    <div class="feature-icon" style="--accent: #6366f1;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="2" y1="12" x2="22" y2="12" />
+                            <path
+                                d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                        </svg>
+                    </div>
+                    <h3>Multi-Language</h3>
+                    <p>Communicate and analyze content in 95+ languages with accurate translations. (Online mode)</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Chat Demo Section -->
+    <section class="demo" id="demo">
+        <div class="section-container">
+            <div class="section-header">
+                <span class="section-tag">Live AI Chat</span>
+                <h2 class="section-title">Chat With
+                    <span class="gradient-text">Real AI</span>
+                </h2>
+                <p class="section-description">Upload files, images, or just type a message. Works in both modes!</p>
+            </div>
+            <div class="chat-demo glass-card">
+                <div class="chat-demo-header">
+                    <div class="chat-status">
+                        <span class="status-dot" id="status-dot"></span>
+                        <span id="status-text">AI Assistant</span>
+                    </div>
+                    <div class="chat-header-actions">
+                        <span class="mode-indicator" id="mode-indicator">—</span>
+                        <button class="clear-chat-btn" id="clear-chat" title="Clear chat">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path
+                                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                            Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
+                    <div class="chat-msg bot">
+                        <div class="msg-avatar">AI</div>
+                        <div class="msg-content">
+                            <p>Hey there! 👋 I'm your AI Assistant. Choose a mode from the welcome screen, then ask me
+                                anything!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- File Preview Area -->
+                <div class="file-preview-area" id="file-preview-area" style="display:none;">
+                    <div class="file-preview" id="file-preview"></div>
+                </div>
+
+                <!-- Drop Zone Overlay -->
+                <div class="drop-zone-overlay" id="drop-zone-overlay">
+                    <div class="drop-zone-content">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="17 8 12 3 7 8" />
+                            <line x1="12" y1="3" x2="12" y2="15" />
+                        </svg>
+                        <p>Drop your file here</p>
+                        <span>Images, text, PDF, CSV, JSON</span>
+                    </div>
+                </div>
+
+                <form class="chat-input-area" id="chat-form">
+                    <input type="file" id="file-input" accept=".txt,.pdf,.png,.jpg,.jpeg,.gif,.webp,.csv,.json" hidden>
+                    <button type="button" class="attach-btn" id="attach-btn" title="Attach a file">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path
+                                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                        </svg>
+                    </button>
+                    <input type="text" id="chat-input" placeholder="Type your message or upload a file..."
+                        autocomplete="off">
+                    <button type="submit" id="chat-send" aria-label="Send message">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13" />
+                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                        </svg>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Section -->
+    <section class="about" id="about">
+        <div class="section-container">
+            <div class="about-grid">
+                <div class="about-content">
+                    <span class="section-tag">About</span>
+                    <h2 class="section-title">Built for the
+                        <span class="gradient-text">Future</span>
+                    </h2>
+                    <p>AI Assistant is designed to be your ultimate productivity partner. Choose Online mode for full
+                        cloud AI power, or Offline mode for instant help anywhere — no internet needed.</p>
+                    <ul class="about-list">
+                        <li>
+                            <span class="check-icon">✓</span>
+                            <span>Two modes — Online (full AI) & Offline (local AI)</span>
+                        </li>
+                        <li>
+                            <span class="check-icon">✓</span>
+                            <span>100% free — no billing or credits needed</span>
+                        </li>
+                        <li>
+                            <span class="check-icon">✓</span>
+                            <span>Supports images, text, PDF, CSV, JSON</span>
+                        </li>
+                        <li>
+                            <span class="check-icon">✓</span>
+                            <span>Ask anything, generate code, analyze files</span>
+                        </li>
+                    </ul>
+                </div>
+                <div class="about-visual">
+                    <div class="glow-ring">
+                        <div class="glow-ring-inner">
+                            <span class="glow-icon">✦</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="section-container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <a href="#" class="nav-logo">
+                        <span class="logo-icon">✦</span>
+                        <span class="logo-text">AI Assistant</span>
+                    </a>
+                    <p>Your intelligent companion — works online & offline.</p>
+                </div>
+                <div class="footer-links">
+                    <a href="#features">Features</a>
+                    <a href="#demo">Demo</a>
+                    <a href="#about">About</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 AI Assistant. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Error catcher (shows JS errors visually) -->
+    <script>
+        window.onerror = function (msg, src, line, col, err) {
+            if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
+            var d = document.createElement('div');
+            d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#ff0000;color:#fff;padding:12px;font-size:14px;font-family:monospace;word-wrap:break-word;cursor:pointer;';
+            d.textContent = '❌ JS Error: ' + msg + ' (line ' + line + ')';
+            d.onclick = function () { d.remove(); };
+            document.body.appendChild(d);
+        };
+    </script>
+    <script src="script.js"></script>
+    <!-- Fallback: ensure form always works even if main script has errors -->
+    <script>
+        (function () {
+            var form = document.getElementById('chat-form');
+            var input = document.getElementById('chat-input');
+            var msgs = document.getElementById('chat-messages');
+            if (!form || !input || !msgs) return;
+
+            function sanitize(str) {
+                var d = document.createElement('div');
+                d.textContent = str;
+                return d.innerHTML;
+            }
+
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                if (window._mainScriptReady) return;
+
+                var msg = input.value.trim();
+                if (!msg) return;
+
+                // Add user message (sanitized)
+                var userDiv = document.createElement('div');
+                userDiv.className = 'chat-msg user';
+                userDiv.innerHTML = '<div class="msg-avatar">You</div><div class="msg-content"><p>' + sanitize(msg) + '</p></div>';
+                msgs.appendChild(userDiv);
+                input.value = '';
+
+                // Try to use OfflineAI if it exists
+                var reply = '⚠️ The main app script had an error. Please press F12 → Console to see the error, then refresh.';
+                if (typeof OfflineAI !== 'undefined' && OfflineAI.respond) {
+                    try {
+                        reply = OfflineAI.respond(msg, null);
+                    } catch (err) {
+                        reply = '❌ Error: ' + err.message;
+                    }
+                }
+
+                var botDiv = document.createElement('div');
+                botDiv.className = 'chat-msg bot';
+                botDiv.innerHTML = '<div class="msg-avatar">AI</div><div class="msg-content"><p>' + sanitize(reply) + '</p></div>';
+                msgs.appendChild(botDiv);
+                msgs.scrollTop = msgs.scrollHeight;
+            });
+        })();
+    </script>
+</body>
+
+</html>
