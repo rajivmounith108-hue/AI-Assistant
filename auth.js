@@ -65,6 +65,8 @@ function requireAuth(callback) {
 function redirectIfLoggedIn() {
     auth.onAuthStateChanged((user) => {
         if (user) {
+            // Force the mode selection screen whenever entering the app from the login page
+            localStorage.removeItem('app_mode');
             window.location.href = 'chat.html';
         }
     });
