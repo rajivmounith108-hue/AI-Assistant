@@ -215,7 +215,9 @@ async function loadChatList() {
         }
 
         container.innerHTML = '';
+        let firstDocId = null;
         snapshot.forEach(doc => {
+            if (!firstDocId) firstDocId = doc.id;
             const data = doc.data();
             const el = document.createElement('div');
             el.className = 'sidebar-chat-item' + (doc.id === currentChatId ? ' active' : '');
@@ -238,6 +240,11 @@ async function loadChatList() {
             });
             container.appendChild(el);
         });
+
+        // Auto-load the most recent chat if the user just refreshed and has history
+        if (!currentChatId && firstDocId) {
+            loadChat(firstDocId);
+        }
     } catch (err) {
         console.error('Error loading chat list:', err);
     }
