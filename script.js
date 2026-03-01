@@ -141,11 +141,14 @@ function setupUserProfile() {
     const nameEl = document.getElementById('user-name');
     const signoutBtn = document.getElementById('signout-btn');
 
-    if (avatarEl && user.photoURL) avatarEl.src = user.photoURL;
+    if (avatarEl && user.photoURL) {
+        // Add cache buster for Google profile photos to bypass stale 403s
+        avatarEl.src = user.photoURL + "?sz=128&_t=" + Date.now();
+    }
     if (nameEl) nameEl.textContent = user.displayName || user.email || 'User';
     if (signoutBtn) {
         signoutBtn.addEventListener('click', () => {
-            if (typeof signOutUser === 'function') signOutUser();
+            window.signOutUser();
         });
     }
 }
@@ -172,7 +175,10 @@ function startNewChat() {
     conversationHistory = [];
     chatMessages.innerHTML = '';
     addBotMessage("Hey there! 👋 I'm your AI Assistant. Choose a mode from the welcome screen, then ask me anything!");
-    if (chatSidebar) chatSidebar.classList.remove('open');
+    // Auto-close sidebar on mobile
+    if (window.innerWidth <= 768 && chatSidebar) {
+        chatSidebar.classList.remove('open');
+    }
 }
 
 async function loadChatList() {
@@ -208,6 +214,10 @@ async function loadChatList() {
                     return;
                 }
                 loadChat(doc.id);
+                // Auto-close sidebar on mobile after selecting a chat
+                if (window.innerWidth <= 768 && chatSidebar) {
+                    chatSidebar.classList.remove('open');
+                }
             });
             container.appendChild(el);
         });

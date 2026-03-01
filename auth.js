@@ -32,6 +32,7 @@ async function signOutUser() {
         console.error('Sign-out error:', error);
     }
 }
+window.signOutUser = signOutUser;
 
 // Get current user's ID token (for backend API calls)
 async function getIdToken() {
