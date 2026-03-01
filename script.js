@@ -198,9 +198,8 @@ async function loadChatList() {
     if (!user || typeof db === 'undefined') return;
 
     try {
-        // Only fetch chats belonging to the current mode
+        // Fetch all conversations for the user so NO legacy history is hidden
         const snapshot = await db.collection('users').doc(user.uid).collection('chats')
-            .where('mode', '==', appMode || 'online')
             .orderBy('updatedAt', 'desc').limit(30).get();
 
         const container = document.getElementById('sidebar-chats');
@@ -268,13 +267,14 @@ async function loadChat(chatId) {
         currentChatId = chatId;
         conversationHistory = data.messages || [];
 
-        // Render messages
+        // Render messages safely, supporting both new and legacy formats
         chatMessages.innerHTML = '';
         conversationHistory.forEach(msg => {
+            const text = msg.parts ? msg.parts.map(p => p.text).join('') : (msg.text || msg.content || '');
             if (msg.role === 'user') {
-                addRawMessage(`<p>${escapeHtml(msg.parts.map(p => p.text).join(''))}</p>`, 'user');
+                addRawMessage(`<p>${escapeHtml(text)}</p>`, 'user');
             } else {
-                addBotMessage(msg.parts.map(p => p.text).join(''));
+                addBotMessage(text);
             }
         });
 
