@@ -10,7 +10,7 @@ async function signInWithGoogle() {
     try {
         const result = await auth.signInWithPopup(googleProvider);
         // Force mode selection screen on fresh sign in
-        localStorage.removeItem('ai_app_mode');
+        localStorage.removeItem('app_mode');
         return result.user;
     } catch (error) {
         console.error('Google sign-in error:', error);
@@ -29,7 +29,7 @@ async function signInWithGoogle() {
 async function signOutUser() {
     try {
         // Clear cached mode so next login asks for mode again
-        localStorage.removeItem('ai_app_mode');
+        localStorage.removeItem('app_mode');
         await auth.signOut();
         window.location.href = 'index.html';
     } catch (error) {

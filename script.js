@@ -267,14 +267,34 @@ async function loadChat(chatId) {
         currentChatId = chatId;
         conversationHistory = data.messages || [];
 
-        // Render messages safely, supporting both new and legacy formats
+        // Render messages safely, supporting both new and legacy formats, with extreme null-checking
         chatMessages.innerHTML = '';
         conversationHistory.forEach(msg => {
-            const text = msg.parts ? msg.parts.map(p => p.text).join('') : (msg.text || msg.content || '');
-            if (msg.role === 'user') {
-                addRawMessage(`<p>${escapeHtml(text)}</p>`, 'user');
-            } else {
-                addBotMessage(text);
+            try {
+                if (!msg) return; // Skip corrupted null messages
+
+                let text = '';
+                if (msg.parts && Array.isArray(msg.parts)) {
+                    text = msg.parts.map(p => {
+                        if (typeof p === 'string') return p;
+                        if (p && typeof p === 'object') return p.text || '';
+                        return '';
+                    }).join('');
+                } else if (msg.text || msg.content) {
+                    text = msg.text || msg.content || '';
+                } else {
+                    throw new Error("Message missing parts or text fields");
+                }
+
+                const role = msg.role || (msg.isBot ? 'model' : 'user');
+
+                if (role === 'user') {
+                    addRawMessage(`<p>${escapeHtml(text)}</p>`, 'user');
+                } else {
+                    addBotMessage(text);
+                }
+            } catch (err) {
+                console.error("Failed to render a legacy message:", err, msg);
             }
         });
 
@@ -282,6 +302,7 @@ async function loadChat(chatId) {
         loadChatList(); // refresh to highlight active
     } catch (err) {
         console.error('Error loading chat:', err);
+        addBotMessage("❌ **Error loading chat:** The saved history format is corrupted or incompatible.");
     }
 }
 
