@@ -193,57 +193,88 @@ function startNewChat() {
     }
 }
 
+// ===== Chat Cache Helpers =====
+const CHAT_LIST_CACHE_KEY = 'chat_list_cache_v1';
+const CHAT_MSG_CACHE_PREFIX = 'chat_msg_cache_v1_';
+
+function saveChatListCache(items) {
+    try { localStorage.setItem(CHAT_LIST_CACHE_KEY, JSON.stringify(items)); } catch (e) { }
+}
+function getChatListCache() {
+    try { const v = localStorage.getItem(CHAT_LIST_CACHE_KEY); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+}
+function saveChatMsgCache(chatId, messages) {
+    try { localStorage.setItem(CHAT_MSG_CACHE_PREFIX + chatId, JSON.stringify(messages)); } catch (e) { }
+}
+function getChatMsgCache(chatId) {
+    try { const v = localStorage.getItem(CHAT_MSG_CACHE_PREFIX + chatId); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+}
+
+function renderSidebarItems(items, container) {
+    container.innerHTML = '';
+    let firstId = null;
+    items.forEach(item => {
+        if (!firstId) firstId = item.id;
+        const el = document.createElement('div');
+        el.className = 'sidebar-chat-item' + (item.id === currentChatId ? ' active' : '');
+        el.innerHTML = `
+            <span class="sidebar-chat-title">${escapeHtml(item.title || 'Untitled Chat')}</span>
+            <span class="sidebar-chat-time">${item.time || ''}</span>
+            <button class="sidebar-chat-delete" data-id="${item.id}" title="Delete">×</button>
+        `;
+        el.addEventListener('click', (e) => {
+            if (e.target.classList.contains('sidebar-chat-delete')) {
+                e.stopPropagation();
+                deleteChat(e.target.dataset.id);
+                return;
+            }
+            loadChat(item.id);
+            if (window.innerWidth <= 768 && chatSidebar) chatSidebar.classList.remove('open');
+        });
+        container.appendChild(el);
+    });
+    return firstId;
+}
+
 async function loadChatList() {
     const user = window._currentUser || (typeof auth !== 'undefined' ? auth.currentUser : null);
     if (!user || typeof db === 'undefined') return;
 
+    const container = document.getElementById('sidebar-chats');
+    if (!container) return;
+
+    // --- STEP 1: Render from cache instantly (zero wait) ---
+    const cached = getChatListCache();
+    let renderedFirstId = null;
+    if (cached && cached.length > 0) {
+        renderedFirstId = renderSidebarItems(cached, container);
+        if (!currentChatId && renderedFirstId) loadChat(renderedFirstId);
+    }
+
+    // --- STEP 2: Sync with Firestore in background ---
     try {
-        // Fetch all conversations for the user so NO legacy history is hidden
         const snapshot = await db.collection('users').doc(user.uid).collection('chats')
             .orderBy('updatedAt', 'desc').limit(30).get();
 
-        const container = document.getElementById('sidebar-chats');
-        if (!container) return;
-
         if (snapshot.empty) {
             container.innerHTML = '<div class="sidebar-empty">No conversations yet.<br>Start chatting!</div>';
-            // Force a new chat to initialize properly if they have zero history
-            if (!currentChatId) {
-                startNewChat();
-            }
+            saveChatListCache([]);
+            if (!currentChatId) startNewChat();
             return;
         }
 
-        container.innerHTML = '';
-        let firstDocId = null;
+        const freshItems = [];
         snapshot.forEach(doc => {
-            if (!firstDocId) firstDocId = doc.id;
             const data = doc.data();
-            const el = document.createElement('div');
-            el.className = 'sidebar-chat-item' + (doc.id === currentChatId ? ' active' : '');
-            el.innerHTML = `
-                <span class="sidebar-chat-title">${escapeHtml(data.title || 'Untitled Chat')}</span>
-                <span class="sidebar-chat-time">${formatChatTime(data.updatedAt)}</span>
-                <button class="sidebar-chat-delete" data-id="${doc.id}" title="Delete">×</button>
-            `;
-            el.addEventListener('click', (e) => {
-                if (e.target.classList.contains('sidebar-chat-delete')) {
-                    e.stopPropagation();
-                    deleteChat(e.target.dataset.id);
-                    return;
-                }
-                loadChat(doc.id);
-                // Auto-close sidebar on mobile after selecting a chat
-                if (window.innerWidth <= 768 && chatSidebar) {
-                    chatSidebar.classList.remove('open');
-                }
-            });
-            container.appendChild(el);
+            freshItems.push({ id: doc.id, title: data.title || 'Untitled Chat', time: formatChatTime(data.updatedAt) });
         });
 
-        // Auto-load the most recent chat if the user just refreshed and has history
-        if (!currentChatId && firstDocId) {
-            loadChat(firstDocId);
+        saveChatListCache(freshItems);
+        const firstId = renderSidebarItems(freshItems, container);
+
+        // Only auto-load if we haven't already loaded from cache
+        if (!currentChatId && firstId && !renderedFirstId) {
+            loadChat(firstId);
         }
     } catch (err) {
         console.error('Error loading chat list:', err);
@@ -262,54 +293,70 @@ function formatChatTime(timestamp) {
     return date.toLocaleDateString();
 }
 
+function renderMessages(messages) {
+    chatMessages.innerHTML = '';
+    messages.forEach(msg => {
+        try {
+            if (!msg) return;
+            let text = '';
+            if (msg.parts && Array.isArray(msg.parts)) {
+                text = msg.parts.map(p => {
+                    if (typeof p === 'string') return p;
+                    if (p && typeof p === 'object') return p.text || '';
+                    return '';
+                }).join('');
+            } else if (msg.text || msg.content) {
+                text = msg.text || msg.content || '';
+            } else {
+                return; // skip silently
+            }
+            const role = msg.role || (msg.isBot ? 'model' : 'user');
+            if (role === 'user') {
+                addRawMessage(`<p>${escapeHtml(text)}</p>`, 'user');
+            } else {
+                addBotMessage(text);
+            }
+        } catch (err) {
+            console.error('Failed to render message:', err, msg);
+        }
+    });
+}
+
 async function loadChat(chatId) {
     const user = window._currentUser || (typeof auth !== 'undefined' ? auth.currentUser : null);
     if (!user || typeof db === 'undefined') return;
 
+    currentChatId = chatId;
+
+    // Update sidebar active state immediately
+    document.querySelectorAll('.sidebar-chat-item').forEach(el => el.classList.remove('active'));
+    const activeEl = document.querySelector(`.sidebar-chat-item[data-id="${chatId}"]`);
+    if (activeEl) activeEl.classList.add('active');
+
+    // --- STEP 1: Render from cache instantly (zero wait) ---
+    const cachedMsgs = getChatMsgCache(chatId);
+    if (cachedMsgs && cachedMsgs.length > 0) {
+        conversationHistory = cachedMsgs;
+        renderMessages(cachedMsgs);
+        if (chatSidebar) chatSidebar.classList.remove('open');
+    }
+
+    // --- STEP 2: Fetch from Firestore in background to update cache & history ---
     try {
         const doc = await db.collection('users').doc(user.uid).collection('chats').doc(chatId).get();
         if (!doc.exists) return;
-
         const data = doc.data();
-        currentChatId = chatId;
-        conversationHistory = data.messages || [];
-
-        // Render messages safely, supporting both new and legacy formats, with extreme null-checking
-        chatMessages.innerHTML = '';
-        conversationHistory.forEach(msg => {
-            try {
-                if (!msg) return; // Skip corrupted null messages
-
-                let text = '';
-                if (msg.parts && Array.isArray(msg.parts)) {
-                    text = msg.parts.map(p => {
-                        if (typeof p === 'string') return p;
-                        if (p && typeof p === 'object') return p.text || '';
-                        return '';
-                    }).join('');
-                } else if (msg.text || msg.content) {
-                    text = msg.text || msg.content || '';
-                } else {
-                    throw new Error("Message missing parts or text fields");
-                }
-
-                const role = msg.role || (msg.isBot ? 'model' : 'user');
-
-                if (role === 'user') {
-                    addRawMessage(`<p>${escapeHtml(text)}</p>`, 'user');
-                } else {
-                    addBotMessage(text);
-                }
-            } catch (err) {
-                console.error("Failed to render a legacy message:", err, msg);
-            }
-        });
-
-        if (chatSidebar) chatSidebar.classList.remove('open');
-        loadChatList(); // refresh to highlight active
+        const freshMsgs = data.messages || [];
+        saveChatMsgCache(chatId, freshMsgs);
+        conversationHistory = freshMsgs;
+        // Only re-render if we didn't have a cache hit (avoids unnecessary flicker)
+        if (!cachedMsgs || cachedMsgs.length === 0) {
+            renderMessages(freshMsgs);
+            if (chatSidebar) chatSidebar.classList.remove('open');
+        }
     } catch (err) {
         console.error('Error loading chat:', err);
-        addBotMessage("❌ **Error loading chat:** The saved history format is corrupted or incompatible.");
+        if (!cachedMsgs) addBotMessage('❌ **Error loading chat:** Could not reach the server.');
     }
 }
 
@@ -344,6 +391,9 @@ async function saveChat(userText, fileMetadata) {
             const docRef = await db.collection('users').doc(user.uid).collection('chats').add(chatData);
             currentChatId = docRef.id;
         }
+
+        // Warm the message cache so next click on this chat is instant
+        saveChatMsgCache(currentChatId, conversationHistory);
 
         loadChatList();
     } catch (err) {
