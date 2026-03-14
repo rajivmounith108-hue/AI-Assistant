@@ -1,4 +1,4 @@
-﻿// ===== Configuration =====
+// ===== Configuration =====
 // API is on the same domain (Vercel serverless function at /api/chat)
 const BACKEND_URL = '';
 
@@ -12,13 +12,11 @@ const attachBtn = document.getElementById('attach-btn');
 const filePreviewArea = document.getElementById('file-preview-area');
 const filePreview = document.getElementById('file-preview');
 const dropZoneOverlay = document.getElementById('drop-zone-overlay');
-const clearChatBtn = document.getElementById('clear-chat');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const chatSend = document.getElementById('chat-send');
 const modeScreen = document.getElementById('mode-screen');
 const modeIndicator = document.getElementById('mode-indicator');
-const heroModeText = document.getElementById('hero-mode-text');
 const switchModeBtn = document.getElementById('switch-mode');
 
 // ===== Safe localStorage helpers =====
@@ -79,13 +77,11 @@ function updateModeUI() {
         statusText.textContent = 'Online AI';
         modeIndicator.textContent = '🌐 Online';
         modeIndicator.className = 'mode-indicator mode-online';
-        heroModeText.textContent = 'Online Mode — Full AI Power';
     } else if (appMode === 'offline') {
         statusDot.className = 'status-dot offline';
         statusText.textContent = 'Offline — Local AI';
         modeIndicator.textContent = '📡 Offline';
         modeIndicator.className = 'mode-indicator mode-offline';
-        heroModeText.textContent = 'Offline Mode — No Key Needed';
     }
 }
 
@@ -193,15 +189,15 @@ function startNewChat() {
     }
 }
 
-// ===== Chat Cache Helpers =====
-const CHAT_LIST_CACHE_KEY = 'chat_list_cache_v1';
+// ===== Chat Cache Helpers (mode-specific) =====
+function getChatListCacheKey() { return 'chat_list_cache_v2_' + (appMode || 'online'); }
 const CHAT_MSG_CACHE_PREFIX = 'chat_msg_cache_v1_';
 
 function saveChatListCache(items) {
-    try { localStorage.setItem(CHAT_LIST_CACHE_KEY, JSON.stringify(items)); } catch (e) { }
+    try { localStorage.setItem(getChatListCacheKey(), JSON.stringify(items)); } catch (e) { }
 }
 function getChatListCache() {
-    try { const v = localStorage.getItem(CHAT_LIST_CACHE_KEY); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+    try { const v = localStorage.getItem(getChatListCacheKey()); return v ? JSON.parse(v) : null; } catch (e) { return null; }
 }
 function saveChatMsgCache(chatId, messages) {
     try { localStorage.setItem(CHAT_MSG_CACHE_PREFIX + chatId, JSON.stringify(messages)); } catch (e) { }
@@ -209,18 +205,27 @@ function saveChatMsgCache(chatId, messages) {
 function getChatMsgCache(chatId) {
     try { const v = localStorage.getItem(CHAT_MSG_CACHE_PREFIX + chatId); return v ? JSON.parse(v) : null; } catch (e) { return null; }
 }
+function removeChatMsgCache(chatId) {
+    try { localStorage.removeItem(CHAT_MSG_CACHE_PREFIX + chatId); } catch (e) { }
+}
 
 function renderSidebarItems(items, container) {
     container.innerHTML = '';
+    if (items.length === 0) {
+        const modeLabel = appMode === 'offline' ? 'offline' : 'online';
+        container.innerHTML = `<div class="sidebar-empty">No ${modeLabel} conversations yet.<br>Start chatting!</div>`;
+        return null;
+    }
     let firstId = null;
     items.forEach(item => {
         if (!firstId) firstId = item.id;
         const el = document.createElement('div');
         el.className = 'sidebar-chat-item' + (item.id === currentChatId ? ' active' : '');
+        el.dataset.id = item.id;
         el.innerHTML = `
             <span class="sidebar-chat-title">${escapeHtml(item.title || 'Untitled Chat')}</span>
             <span class="sidebar-chat-time">${item.time || ''}</span>
-            <button class="sidebar-chat-delete" data-id="${item.id}" title="Delete">×</button>
+            <button class="sidebar-chat-delete" data-id="${item.id}" title="Delete chat">🗑️</button>
         `;
         el.addEventListener('click', (e) => {
             if (e.target.classList.contains('sidebar-chat-delete')) {
@@ -245,21 +250,20 @@ async function loadChatList() {
 
     // --- STEP 1: Render from cache instantly (zero wait) ---
     const cached = getChatListCache();
-    let renderedFirstId = null;
     if (cached && cached.length > 0) {
-        renderedFirstId = renderSidebarItems(cached, container);
-        if (!currentChatId && renderedFirstId) loadChat(renderedFirstId);
+        renderSidebarItems(cached, container);
     }
 
-    // --- STEP 2: Sync with Firestore in background ---
+    // --- STEP 2: Sync with Firestore in background (filtered by current mode) ---
     try {
+        const currentMode = appMode || 'online';
         const snapshot = await db.collection('users').doc(user.uid).collection('chats')
+            .where('mode', '==', currentMode)
             .orderBy('updatedAt', 'desc').limit(30).get();
 
         if (snapshot.empty) {
-            container.innerHTML = '<div class="sidebar-empty">No conversations yet.<br>Start chatting!</div>';
             saveChatListCache([]);
-            if (!currentChatId) startNewChat();
+            renderSidebarItems([], container);
             return;
         }
 
@@ -270,12 +274,7 @@ async function loadChatList() {
         });
 
         saveChatListCache(freshItems);
-        const firstId = renderSidebarItems(freshItems, container);
-
-        // Only auto-load if we haven't already loaded from cache
-        if (!currentChatId && firstId && !renderedFirstId) {
-            loadChat(firstId);
-        }
+        renderSidebarItems(freshItems, container);
     } catch (err) {
         console.error('Error loading chat list:', err);
     }
@@ -376,8 +375,7 @@ async function saveChat(userText, fileMetadata) {
 
         // Attach file metadata if present
         if (fileMetadata) {
-            if (!chatData.files) chatData.files = firebase.firestore.FieldValue.arrayUnion(fileMetadata);
-            else chatData.files = firebase.firestore.FieldValue.arrayUnion(fileMetadata);
+            chatData.files = firebase.firestore.FieldValue.arrayUnion(fileMetadata);
         }
 
         // Remove undefined fields
@@ -405,9 +403,26 @@ async function deleteChat(chatId) {
     const user = window._currentUser || (typeof auth !== 'undefined' ? auth.currentUser : null);
     if (!user || typeof db === 'undefined') return;
 
+    // Confirm before deleting
+    if (!confirm('Delete this conversation?')) return;
+
     try {
+        // Remove from Firestore
         await db.collection('users').doc(user.uid).collection('chats').doc(chatId).delete();
+
+        // Clear message cache for this chat
+        removeChatMsgCache(chatId);
+
+        // Remove from list cache for instant sidebar update
+        const cached = getChatListCache();
+        if (cached) {
+            saveChatListCache(cached.filter(item => item.id !== chatId));
+        }
+
+        // If deleting the active chat, start fresh
         if (chatId === currentChatId) startNewChat();
+
+        // Refresh sidebar
         loadChatList();
     } catch (err) {
         console.error('Error deleting chat:', err);
@@ -685,59 +700,72 @@ async function callWebLLM(userText, file) {
     chatSend.disabled = false;
 }
 
-// Switch mode button in nav
-switchModeBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    showModeScreen();
-});
+// ===== Three-dot Menu =====
+const menuBtn = document.getElementById('menu-btn');
+const menuDropdown = document.getElementById('menu-dropdown');
 
+if (menuBtn && menuDropdown) {
+    menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menuDropdown.classList.toggle('open');
+    });
+    document.addEventListener('click', () => menuDropdown.classList.remove('open'));
+    menuDropdown.addEventListener('click', (e) => e.stopPropagation());
+}
 
-// ===== Navbar Scroll Effect =====
-const navbar = document.getElementById('navbar');
-const navToggle = document.getElementById('nav-toggle');
-const navLinks = document.getElementById('nav-links');
-
-window.addEventListener('scroll', () => {
-    if (navbar) navbar.classList.toggle('scrolled', window.scrollY > 50);
-});
-
-// ===== Mobile Nav Toggle =====
-if (navToggle) {
-    navToggle.addEventListener('click', () => {
-        navToggle.classList.toggle('active');
-        navLinks.classList.toggle('active');
+// Menu: Switch Mode
+if (switchModeBtn) {
+    switchModeBtn.addEventListener('click', () => {
+        menuDropdown.classList.remove('open');
+        showModeScreen();
     });
 }
 
-navLinks.querySelectorAll('a').forEach(link => {
-    link.addEventListener('click', () => {
-        navToggle.classList.remove('active');
-        navLinks.classList.remove('active');
+// Menu: New Chat
+const menuNewChat = document.getElementById('menu-new-chat');
+if (menuNewChat) {
+    menuNewChat.addEventListener('click', () => {
+        menuDropdown.classList.remove('open');
+        startNewChat();
     });
-});
+}
 
-// ===== Scroll-triggered Animations =====
-const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-        if (entry.isIntersecting) {
-            const delay = Array.from(entry.target.parentElement.children).indexOf(entry.target) * 100;
-            setTimeout(() => entry.target.classList.add('visible'), delay);
-            observer.unobserve(entry.target);
-        }
+// Menu: Clear Chat
+const menuClearChat = document.getElementById('menu-clear-chat');
+if (menuClearChat) {
+    menuClearChat.addEventListener('click', () => {
+        menuDropdown.classList.remove('open');
+        conversationHistory = [];
+        chatMessages.innerHTML = '<div class="chat-msg bot"><div class="msg-avatar">AI</div><div class="msg-content"><p>Chat cleared! 🧹 Ready for a new conversation.</p></div></div>';
+        clearPendingFile();
     });
-}, { threshold: 0.15, rootMargin: '0px 0px -50px 0px' });
+}
 
-document.querySelectorAll('[data-animate]').forEach(el => observer.observe(el));
-
-// ===== Smooth Scroll =====
-document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-    anchor.addEventListener('click', function (e) {
-        if (this.id === 'change-api-key' || this.id === 'switch-mode') return;
-        e.preventDefault();
-        const target = document.querySelector(this.getAttribute('href'));
-        if (target) target.scrollIntoView({ behavior: 'smooth' });
+// Menu: About
+const menuAbout = document.getElementById('menu-about');
+const aboutModal = document.getElementById('about-modal');
+const closeAboutBtn = document.getElementById('close-about-btn');
+if (menuAbout && aboutModal) {
+    menuAbout.addEventListener('click', () => {
+        menuDropdown.classList.remove('open');
+        aboutModal.classList.remove('hidden');
     });
-});
+}
+if (closeAboutBtn && aboutModal) {
+    closeAboutBtn.addEventListener('click', () => aboutModal.classList.add('hidden'));
+}
+if (aboutModal) {
+    aboutModal.addEventListener('click', (e) => { if (e.target === aboutModal) aboutModal.classList.add('hidden'); });
+}
+
+// Menu: Sign Out
+const menuSignout = document.getElementById('menu-signout');
+if (menuSignout) {
+    menuSignout.addEventListener('click', () => {
+        menuDropdown.classList.remove('open');
+        if (typeof signOutUser === 'function') signOutUser();
+    });
+}
 
 // ===== File Handling =====
 attachBtn.addEventListener('click', () => fileInput.click());
@@ -748,26 +776,28 @@ fileInput.addEventListener('change', (e) => {
     }
 });
 
-const chatDemo = document.querySelector('.chat-demo');
+const chatArea = document.getElementById('chat-area') || document.querySelector('.chat-area');
 
-chatDemo.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZoneOverlay.classList.add('active');
-});
+if (chatArea) {
+    chatArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZoneOverlay.classList.add('active');
+    });
 
-chatDemo.addEventListener('dragleave', (e) => {
-    if (!chatDemo.contains(e.relatedTarget)) {
+    chatArea.addEventListener('dragleave', (e) => {
+        if (!chatArea.contains(e.relatedTarget)) {
+            dropZoneOverlay.classList.remove('active');
+        }
+    });
+
+    chatArea.addEventListener('drop', (e) => {
+        e.preventDefault();
         dropZoneOverlay.classList.remove('active');
-    }
-});
-
-chatDemo.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZoneOverlay.classList.remove('active');
-    if (e.dataTransfer.files.length > 0) {
-        handleFile(e.dataTransfer.files[0]);
-    }
-});
+        if (e.dataTransfer.files.length > 0) {
+            handleFile(e.dataTransfer.files[0]);
+        }
+    });
+}
 
 // ===== Save File Metadata to Firestore (FREE — no billing needed) =====
 // Small files (<500KB) are saved with their data as base64 in Firestore
@@ -901,19 +931,7 @@ function formatFileSize(bytes) {
     return OfflineAI.formatSize(bytes);
 }
 
-// ===== Clear Chat =====
-clearChatBtn.addEventListener('click', () => {
-    conversationHistory = [];
-    chatMessages.innerHTML = `
-        <div class="chat-msg bot">
-            <div class="msg-avatar">AI</div>
-            <div class="msg-content">
-                <p>Chat cleared! 🧹 Ready for a new conversation.</p>
-            </div>
-        </div>
-    `;
-    clearPendingFile();
-});
+// ===== Clear Chat (handled via three-dot menu above) =====
 
 // ===== Chat Submission =====
 chatForm.addEventListener('submit', async (e) => {
@@ -1820,7 +1838,7 @@ const OfflineAI = {
             cpp: '⚙️ **C++:**\n\`\`\`cpp\n#include <iostream>\nint main() { std::cout << "Hello"; return 0; }\n\`\`\`',
             sql: '🗄️ **SQL:**\n\`\`\`sql\nSELECT * FROM users WHERE active = 1;\nUPDATE users SET score = 100;\n\`\`\`',
             rust: '🦀 **Rust:**\n\`\`\`rust\nfn main() { println!("Hello"); }\n\`\`\`',
-            go: '🐹 **Go:**\n\`\`\`go\nfunc main() { fmt.Println("Hello") }\n\`\`\''
+            go: '🐹 **Go:**\n\`\`\`go\nfunc main() { fmt.Println("Hello") }\n\`\`\`'
         };
 
         if (refs[lang]) return refs[lang];
@@ -2127,7 +2145,11 @@ async function callBackendAPI(userText, file) {
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            addBotMessage(`\u274c **Error:** ${errorData.error || 'Server returned ' + response.status}`);
+            if (response.status === 405 || response.status === 404) {
+                addBotMessage("⚠️ **Backend not available.** The `/api/chat` endpoint requires deployment on **Vercel** (or run `vercel dev` locally).\n\nYour options:\n1. **Deploy to Vercel** — push your project to Vercel for online mode\n2. **Switch to Offline Mode** — use the ⋮ menu → 🔄 Switch Mode for full local AI");
+            } else {
+                addBotMessage(`\u274c **Error:** ${errorData.error || 'Server returned ' + response.status}`);
+            }
             isProcessing = false;
             chatSend.disabled = false;
             return;

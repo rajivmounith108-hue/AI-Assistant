@@ -15,13 +15,17 @@ const firebaseConfig = {
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
-const db = firebase.firestore();
+
+// Firestore is only available on pages that load the Firestore SDK (chat.html)
+const db = typeof firebase.firestore === 'function' ? firebase.firestore() : null;
 
 // Enable offline persistence for Firestore (chat history works offline too)
-db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
-    if (err.code === 'failed-precondition') {
-        console.warn('Firestore persistence: Multiple tabs open');
-    } else if (err.code === 'unimplemented') {
-        console.warn('Firestore persistence: Browser not supported');
-    }
-});
+if (db) {
+    db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
+        if (err.code === 'failed-precondition') {
+            console.warn('Firestore persistence: Multiple tabs open');
+        } else if (err.code === 'unimplemented') {
+            console.warn('Firestore persistence: Browser not supported');
+        }
+    });
+}
